@@ -1,34 +1,32 @@
-import paramiko
-from .base_adapter import BaseAdapter
+import json
+import numpy as np
+from pathlib import Path
+from .base_adapter import AlgorithmAdapter
+from typing import Dict, Any
 
-class Wonder3DAdapter(BaseAdapter):
-    SUPPORTED_FORMATS = {'png'}
-    TIMEOUT = 600  # 10分钟超时
+class Wonder3DAdapter(AlgorithmAdapter):
+    """处理Wonder3D的网格生成算法"""
     
-    def __init__(self, ssh_client):
-        self.ssh = ssh_client
-        self.remote_script = "/opt/Wonder3D/run.sh"
+    def build_command(self, input_path: str, output_dir: str) -> str:
+        return (
+            f"source /workspace/venv/bin/activate && "
+            f"python inference.py --image {input_path} "
+            f"--output {output_dir} --format gltf --resolution 2048"
+        )
+
+    def process_output(self, output_dir: str) -> Dict[str, Any]:
+        output_path = next(Path(output_dir).glob("*.gltf"))
+        material_files = list(Path(output_dir).glob("*.bin"))
         
-    def preprocess(self, input_path):
-        # 传输文件到计算节点
-        sftp = self.ssh.open_sftp()
-        remote_input = f"/data/inputs/{os.path.basename(input_path)}"
-        sftp.put(input_path, remote_input)
-        return remote_input
-    
-    def convert_output(self, input_path):
-        # 执行模型推理
-        cmd = f"bash {self.remote_script} --input {input_path}"
-        stdin, stdout, stderr = self.ssh.exec_command(cmd, timeout=self.TIMEOUT)
-        
-        # 获取输出文件
-        output_file = input_path.replace('inputs', 'outputs') + '.glb'
+        with open(output_path.with_suffix('.json')) as f:
+            metadata = json.load(f)
+            
         return {
-            'file_url': output_file,
-            'metadata': self._parse_logs(stdout.read().decode())
-        }
-    
-    def _parse_logs(self, log_data):
-        return {
-            'processing_time': float(log_data.split('Time:').split('s').strip())
+            "model_type": "gltf",
+            "model_path": str(output_path),
+            "metadata": {
+                "textures": [str(p) for p in Path(output_dir).glob("*.png")],
+                "materials": [str(p) for p in material_files],
+                "bounding_box": metadata.get("bbox", [0,0,0,1,1,1])
+            }
         }
