@@ -1,30 +1,31 @@
-import tensorflow as tf
+import torch
+import torch.nn.functional as F
 from PIL import Image
-import numpy as np
+from torchvision import transforms
 
-MODEL_PATH = 'app/ml_models/scene_classification/efficientnetv2_model.h5'
-LABELS = ['教学楼', '操场', '绿地', '其他']
+CLASS_NAMES = ['教室', '实验室', '图书馆', '体育馆', '食堂']
 
-# 加载预训练模型
-model = tf.keras.models.load_model(MODEL_PATH)
-
-def preprocess_image(image_path, target_size=(384, 384)):
-    img = Image.open(image_path).convert('RGB')
-    img = img.resize(target_size)
-    img_array = tf.keras.preprocessing.image.img_to_array(img)
-    img_array = tf.expand_dims(img_array, 0)  # 添加批次维度
-    return img_array
-
-def classify_scene(image_path):
-    try:
-        processed_img = preprocess_image(image_path)
-        predictions = model.predict(processed_img)
-        confidence = np.max(predictions)
-        class_index = np.argmax(predictions)
-        
-        if confidence < 0.9:
-            return "其他", float(confidence)
-        return LABELS[class_index], float(confidence)
-    except Exception as e:
-        print(f"Classification error: {str(e)}")
-        return "其他", 0.0
+def predict_image(image_path):
+    """使用预训练模型进行场景分类"""
+    model = torch.load('model.pth', map_location='cpu')
+    model.eval()
+    
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    
+    image = Image.open(image_path).convert('RGB')
+    tensor = transform(image).unsqueeze(0)
+    
+    with torch.no_grad():
+        outputs = model(tensor)
+        probs = F.softmax(outputs, dim=1)
+    
+    _, preds = torch.max(outputs, 1)
+    return {
+        'class': CLASS_NAMES[preds.item()],
+        'confidence': round(probs[preds].item(), 4)
+    }
