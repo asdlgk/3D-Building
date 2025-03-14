@@ -1,26 +1,36 @@
 from .base_adapter import BaseAdapter
-import json
 
 class TripoSRAdapter(BaseAdapter):
-    SUPPORTED_FORMATS = ['glb', 'obj']
+    SUPPORTED_FORMATS = {'jpg', 'png', 'jpeg'}
     
     def __init__(self, ssh_client):
         self.ssh = ssh_client
-        self.remote_script = "/opt/TripoSR/run.py"
-    
-    def convert_output(self, remote_output_path):
-        # 执行远程命令
-        stdin, stdout, stderr = self.ssh.exec_command(
-            f"python {self.remote_script} --input {remote_output_path}"
-        )
-        raw_data = stdout.read().decode()
+        self.remote_path = "/opt/TripoSR"
         
-        # 解析输出
+    def preprocess(self, input_path):
+        # 传输文件到GPU服务器
+        sftp = self.ssh.open_sftp()
+        remote_input = f"{self.remote_path}/inputs/{os.path.basename(input_path)}"
+        sftp.put(input_path, remote_input)
+        return remote_input
+    
+    def convert_output(self, input_path):
+        # 执行推理命令
+        cmd = f"cd {self.remote_path} && python inference.py --input {input_path}"
+        stdin, stdout, stderr = self.ssh.exec_command(cmd)
+        
+        if exit_code := stdout.channel.recv_exit_status():
+            raise RuntimeError(f"TripoSR执行失败: {stderr.read().decode()}")
+            
+        # 获取输出文件
+        output_file = f"{self.remote_path}/outputs/{os.path.basename(input_path)}.glb"
         return {
-            "model_type": "glb",
-            "file_url": json.loads(raw_data)['result_path'],
-            "metadata": {
-                "vertices": json.loads(raw_data)['vertex_count'],
-                "textures": True
-            }
+            'file_url': output_file,
+            'metadata': self._parse_metadata(stdout.read().decode())
+        }
+    
+    def _parse_metadata(self, log):
+        return {
+            'polygons': int(log.split('Generated ').split(' polygons')),
+            'vertices': int(log.split('with ').split(' vertices'))
         }
