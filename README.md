@@ -24,8 +24,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourname/3d-campus.git
-cd 3d-campus
+git clone git@github.com:asdlgk/3D-Building.git
+cd 3D-Building
 
 # 安装依赖
 cd backend && pip install -r requirements.txt
